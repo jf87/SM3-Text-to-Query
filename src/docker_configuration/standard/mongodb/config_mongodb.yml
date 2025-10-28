@@ -1,0 +1,8 @@
+#server_uri: mongodb://sm3_mongodb:27017/
+server_uri: mongodb://sm3:sm3@sm3_mongodb:27017/admin
+database: sm3
+#basepath: ../../../data/synthea_data/
+username: sm3
+password: sm3
+authSource: admin
+basepath: /app/data/

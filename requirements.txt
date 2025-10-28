@@ -1,0 +1,33 @@
+# Postgres dependencies
+psycopg[binary]
+sqlalchemy>=2.0.44
+
+# Neo4j dependencies
+neo4j
+
+# Mongo db dependencies
+pymongo
+
+# graph db
+synthea-rdf
+pathlib
+rdflib>=6.3.2
+rdflib-jsonld>=0.6.2
+requests.auth
+
+# Jupyter
+notebook>=7.4
+jupyterlab
+ipython>=9.5
+ipykernel>=6.30
+pandas
+
+
+# LLMs
+google-generativeai
+pandas
+requests
+openai
+groq
+vertexai
+google.cloud

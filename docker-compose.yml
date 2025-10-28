@@ -1,0 +1,206 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: sm3_postgres
+    environment:
+      POSTGRES_USER: sm3
+      POSTGRES_PASSWORD: sm3
+      POSTGRES_DB: sm3
+    # Definition of ports to be accessible outside the container
+    ports:
+    - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sm3 -d sm3"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sm3-network
+
+  postgres_orchestrator:
+    build:
+      context: .
+      dockerfile: src/docker_configuration/standard/postgres/Dockerfile
+    container_name: sm3_pg_build
+    # Persistent Data:
+    volumes:
+    - ./src/docker_configuration/standard/postgres/setup-postgres.py:/app/setup-postgres.py
+    - ./data/synthea_data:/app/data
+    depends_on:
+    - postgres
+    networks:
+    - sm3-network
+
+  # The loading of the data is very slow currently:
+  # - Process has to be reviewed in a deeper manner
+  neo4j:
+    image: neo4j:5.11.0
+    container_name: sm3_neo4j
+    environment:
+      # NOTE: Change the password here, if you are copying this configuration.
+      NEO4J_AUTH: neo4j/password  
+      NEO4J_apoc_export_file_enabled: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      # Make sure APOC is loaded
+      NEO4J_dbms_security_procedures_allowlist: "apoc.*"
+      # Network settings
+      NEO4J_server_default__listen__address: "0.0.0.0"
+      NEO4J_dbms_connector_bolt_listen__address: "0.0.0.0:7687"
+      # Definition of database changes for faster loading:
+      #NEO4J_server_memory_heap_initial__size: 1G
+      #NEO4J_server_memory_heap_max__size: 2G
+      #NEO4J_server_memory_pagecache_size: 1G
+      #NEO4J_dbms_memory_transaction_total_max: 5G
+      NEO4J_db_transaction_concurrent_maximum: 75
+      NEO4J_dbms_memory_transaction_global__max__size: 4G
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+      - "7473:7473"  # HTTPS
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/logs:/logs
+      - ./neo4j/import:/import
+      - ./neo4j/plugins:/plugins
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sm3-network
+
+  neo4j_orchestrator:
+    build:
+      context: .
+      dockerfile: src/docker_configuration/standard/neo4j/Dockerfile
+    container_name: sm3_neo4j_build
+    depends_on:
+      - neo4j
+    volumes:
+      - ./data/synthea_data:/app/data
+      - ./src/docker_configuration/standard/neo4j/config_neo4j.yml:/app/config_neo4j.yml
+      - ./src/docker_configuration/standard/neo4j/ingest.py:/app/ingest.py
+    environment:
+      NEO4J_HOST: sm3_neo4j
+      NEO4J_PORT: 7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      NEO4J_URI: bolt://sm3_neo4j:7687/
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - sm3-network
+
+
+# Definition of mongodb
+  mongodb:
+    image: mongo:6.0
+    container_name: sm3_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: sm3
+      MONGO_INITDB_ROOT_PASSWORD: sm3
+    command:  mongod --auth --wiredTigerCacheSizeGB 1 --setParameter maxTransactionLockRequestTimeoutMillis=5000
+    volumes:
+      - ./data/synthea_data:/data/import
+    ports:
+      - "27018:27017"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - sm3-network
+
+  mongodb_orchestrator:
+    build:
+      context: .
+      dockerfile: src/docker_configuration/standard/mongodb/Dockerfile
+    container_name: sm3_mongodb_build
+    # Persistent Data:
+    volumes:
+      - ./src/docker_configuration/standard/mongodb/setup-mongodb.py:/app/setup-mongodb.py
+      - ./src/docker_configuration/standard/mongodb/config_mongodb.yml:/app/config_mongodb.yml
+      - ./data/synthea_data:/app/data
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: sm3
+      MONGO_INITDB_ROOT_PASSWORD: sm3
+      MONGO_INITDB_DATABASE: sm3
+    networks:
+      - sm3-network
+
+  graphdb:
+    image: ontotext/graphdb:10.3.2
+    # NOTE: This name is different from the others, since it needs to be used in a URL (http://sm3-graphdb) and these don't support underscores.
+    container_name: sm3-graphdb
+    #environment:
+     # GDB_JAVA_OPTS: >-
+     #   -Xms2g -Xmx2g
+     #   -Dgraphdb.home=/opt/graphdb/home
+     #   -Dgraphdb.workbench.importDirectory=/opt/graphdb/import
+     #   -Dgraphdb.workbench.cors.enable=true
+     #   -Denable-context-index=true
+    ports:
+      - "7200:7200"  # HTTP and REST API
+      - "7300:7300"  # Socket connections
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://sm3-graphdb:7200/rest/repositories" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sm3-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  graphdb_orchestrator:
+    build:
+      context: .
+      dockerfile: src/docker_configuration/standard/graphdb/Dockerfile
+    container_name: sm3_graphdb_build
+    volumes:
+      - ./src/docker_configuration/standard/graphdb/config_graphdb.yml:/app/config_graphdb.yml
+      - ./src/docker_configuration/standard/graphdb/repo-config.ttl:/app/repo-config.ttl
+      - ./src/docker_configuration/standard/graphdb/setup-graphdb.py:/app/setup-graphdb.py
+      - ./src/docker_configuration/standard/graphdb/synthea-rdf-converter-fork:/app/synthea-rdf-converter-fork
+      - ./data/synthea_data:/data
+    depends_on:
+      - graphdb
+    # Logical coverage with the definition of the config_graphdb.yml file
+    #environment:
+    #  GRAPHDB_HOST: sm3_graphdb
+    #  GRAPHDB_PORT: 7200
+    #  GRAPHDB_REPOSITORY: sm3_graphdb
+    #  GRAPHDB_USERNAME: admin
+    #  GRAPHDB_PASSWORD: root
+    networks:
+      - sm3-network
+
+networks:
+  sm3-network:
+    driver: bridge

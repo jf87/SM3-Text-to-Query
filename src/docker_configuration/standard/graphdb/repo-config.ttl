@@ -1,0 +1,55 @@
+#
+# RDF4J configuration template for a SM3 GraphDB repository
+# This template is adjusted for the SM3 research project, based on the template sample provided on: https://graphdb.ontotext.com/documentation/10.8/manage-repos-with-restapi.html
+#
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
+@prefix rep: <http://www.openrdf.org/config/repository#>.
+@prefix sr: <http://www.openrdf.org/config/repository/sail#>.
+@prefix sail: <http://www.openrdf.org/config/sail#>.
+@prefix graphdb: <http://www.ontotext.com/config/graphdb#>.
+@prefix syn: <https://knacc.umbc.edu/dae-young/kim/ontologies/synthea#> .
+
+[] a rep:Repository ;
+    rep:repositoryID "sm3_graphdb" ;
+    rdfs:label "SM3 Repository" ;
+    rep:repositoryImpl [
+        rep:repositoryType "graphdb:SailRepository" ;
+        sr:sailImpl [
+            sail:sailType "graphdb:Sail" ;
+
+            graphdb:read-only "false" ;
+
+            # Inference and Validation
+            graphdb:ruleset "rdfsplus-optimized" ;
+            graphdb:disable-sameAs "true" ;
+            graphdb:check-for-inconsistencies "false" ;
+
+            # Indexing
+            graphdb:entity-id-size "32" ;
+            graphdb:enable-context-index "false" ;
+            graphdb:enablePredicateList "true" ;
+            graphdb:enable-fts-index "false" ;
+            graphdb:fts-indexes ("default" "iri") ;
+            graphdb:fts-string-literals-index "default" ;
+            graphdb:fts-iris-index "none" ;
+
+            # Queries and Updates
+            graphdb:query-timeout "0" ;
+            graphdb:throw-QueryEvaluationException-on-timeout "false" ;
+            graphdb:query-limit-results "0" ;
+
+            # Settable in the file but otherwise hidden in the UI and in the RDF4J console
+
+            # Note by Gérôme: I disabled the default import and replaced it with manual instructions in the README
+            # (since this import was not functional and I couldn't get it to work with relative paths)
+            #graphdb:base-URL "http://example.org/owlim#" ;
+            #graphdb:defaultNS "https://knacc.umbc.edu/dae-young/kim/ontologies/synthea#" ;
+            #graphdb:imports "/Users/workstation/Documents/GitHub/SM3-Text-to-Query-fork/src/setup_dbs/graphdb/synthea-rdf-converter-fork/temporary_ttl_files/allergy.ttl";
+
+            graphdb:repository-type "file-repository" ;
+            graphdb:storage-folder "storage" ;
+            graphdb:entity-index-size "10000000" ;
+            graphdb:in-memory-literal-properties "true" ;
+            graphdb:enable-literal-index "true" ;
+        ]
+    ].

@@ -1,0 +1,6 @@
+synthea-rdf
+pathlib
+rdflib>=6.3.2
+rdflib-jsonld>=0.6.2
+requests.auth
+tqdm

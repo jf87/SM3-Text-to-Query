@@ -1,0 +1,19 @@
+# Neo4j dependencies
+neo4j
+pyyaml
+DateTime
+zipfile36
+urllib3
+boto3
+smart-open
+pathlib
+ijson
+botocore
+pathlib
+jmespath
+numpy
+python-dateutil
+pytz
+s3transfer
+six
+pandas

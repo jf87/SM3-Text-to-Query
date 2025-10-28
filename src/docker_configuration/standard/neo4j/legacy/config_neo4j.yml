@@ -1,0 +1,543 @@
+# Neo4j Connection Settings
+server_uri: bolt://sm3_neo4j:7687
+username: neo4j
+password: sm3password
+admin_user: neo4j
+admin_pass: sm3password
+
+# Import Settings (adjust these based on your needs)
+batch_size: 10000
+parallel: true
+nodes_only: false
+
+# File paths
+input_directory: /data
+schema_directory: /app/pyingest/schema
+
+# Logging
+log_level: INFO
+
+
+files:
+# payers
+  - url: ../../data/payers.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MERGE (p:Payer {id:row.Id})
+          SET p.name=row.NAME,
+              p.ownership=row.OWNERSHIP,
+              p.address=row.ADDRESS,
+              p.city=row.CITY,
+              p.state=row.STATE_HEADQUARTERED,
+              p.zip=row.ZIP,
+              p.phone=row.PHONE,
+              p.amount_covered = toFloat(row.AMOUNT_COVERED),
+              p.amount_uncovered = toFloat(row.AMOUNT_UNCOVERED),
+              p.revenue = toFloat(row.REVENUE),
+              p.covered_encounters = toInteger(row.COVERED_ENCOUNTERS),
+              p.uncovered_encounters = toInteger(row.UNCOVERED_ENCOUNTERS),
+              p.covered_medications = toInteger(row.COVERED_MEDICATIONS),
+              p.uncovered_medications = toInteger(row.UNCOVERED_MEDICATIONS),
+              p.covered_procedures = toInteger(row.COVERED_PROCEDURES),
+              p.uncovered_procedures = toInteger(row.UNCOVERED_PROCEDURES),
+              p.covered_immunizations = toInteger(row.COVERED_IMMUNIZATIONS),
+              p.uncovered_immunizations = toInteger(row.UNCOVERED_IMMUNIZATIONS),
+              p.unique_customers = toInteger(row.UNIQUE_CUSTOMERS),
+              p.qols_avg = toFloat(row.QOLS_AVG),
+              p.member_months = toFloat(row.MEMBER_MONTHS)
+
+# encounters
+  - url: ../../data/encounters.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MERGE (e:Encounter {id:row.Id})
+        SET e.code=row.CODE,
+            e.description=row.DESCRIPTION,
+            e.class=row.ENCOUNTERCLASS,
+            e.date=datetime(row.START),
+            e.baseCost=toFloat(row.BASE_ENCOUNTER_COST),
+            e.claimCost=toFloat(row.TOTAL_CLAIM_COST),
+            e.coveredAmount=toFloat(row.PAYER_COVERAGE),
+            e.reasonCode=row.REASONCODE,
+            e.reasonDescription=row.REASONDESCRIPTION,
+            e.isEnd=false
+        FOREACH (ignore in CASE WHEN row.STOP IS NOT NULL AND row.STOP <> '' THEN [1] ELSE [] END |
+            SET e.end=datetime(row.STOP)
+        )
+        MERGE (p:Patient {id:row.PATIENT})
+        MERGE (p)-[:HAS_ENCOUNTER]->(e)
+        MERGE (e)-[:HAS_PATIENT]->(p)
+        FOREACH (ignore in CASE WHEN row.ORGANIZATION IS NOT NULL AND row.ORGANIZATION <> '' THEN [1] ELSE [] END |
+            MERGE (o:Organization {id: row.ORGANIZATION})
+            MERGE (o)-[:IS_PERFOMED_AT]->(e)
+            MERGE (e)-[:IS_RESPONSIBLE_FOR]->(o)
+        )
+        FOREACH (ignore in CASE WHEN row.PROVIDER IS NOT NULL AND row.PROVIDER <> '' THEN [1] ELSE [] END |
+            MERGE (pr:Provider {id: row.PROVIDER})
+            MERGE (e)-[:HAS_PROVIDER]->(pr)
+            MERGE (pr)-[:HAS_ENCOUNTER]->(e)
+        )
+        FOREACH (ignore in CASE WHEN row.PAYER IS NOT NULL AND row.PAYER <> '' THEN [1] ELSE [] END |
+            MERGE (pa:Payer {id:row.PAYER})
+            MERGE (e)-[:IS_COVERED_BY]->(pa)
+            MERGE (pa)-[:HAS_COVERED]->(e)
+        )
+
+# providers
+  - url: ../../data/providers.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MERGE (p:Provider {id: row.Id})
+      SET p.name=row.NAME,
+          p.gender=row.GENDER,
+          p.speciality=row.SPECIALITY,
+          p.address=row.ADDRESS,
+          p.city=row.CITY,
+          p.state=row.STATE,
+          p.zip=row.ZIP,
+          p.lat=row.LAT,
+          p.lon=row.LON,
+          p.encounters=row.ENCOUNTERS,
+          p.procedures=row.PROCEDURES
+      MERGE (o:Organization {id: row.ORGANIZATION})
+      MERGE (p)-[:IS_AFFILIATED_WITH]->(o)
+      MERGE (o)-[:IS_PERFORMED_AT]-(p)
+
+# patients
+  - url: ../../data/patients.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MERGE (p:Patient {id:row.Id})
+          SET
+            p.birthDate=datetime(row.BIRTHDATE),
+            p.deathDate= (CASE WHEN row.DEATHDATE <> "" THEN datetime(row.DEATHDATE) ELSE null END),
+            p.SSN=row.SSN,
+            p.drivers=row.DRIVERS,
+            p.passport=row.PASSPORT,
+            p.prefix=row.PREFIX,
+            p.firstName=row.FIRST,
+            p.lastName=row.LAST,
+            p.suffix=row.SUFFIX,
+            p.maiden=row.MAIDEN,
+            p.marital=row.MARITAL,
+            p.race=row.RACE,
+            p.ethnicity=row.ETHNICITY,
+            p.gender=row.GENDER,
+            p.birthplace=row.BIRTHPLACE,
+            p.address=row.ADDRESS,
+            p.city=row.CITY,
+            p.state=row.STATE,
+            p.county=row.COUNTY,
+            p.FIPS=row.FIPS,
+            p.zip=row.ZIP,
+            p.healthcareExpenses=toFloat(row.HEALTHCARE_EXPENSES),
+            p.healthcareCoverage=toFloat(row.HEALTHCARE_COVERAGE),
+            p.income=toFloat(row.INCOME)
+
+# payer transitions
+  - url: ../../data/payer_transitions.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id:row.PATIENT})
+      MATCH (payer:Payer {id:row.PAYER})
+      CREATE (p)-[s:INSURANCE_START]->(payer)
+      SET s.startDate = datetime(row.START_DATE),
+          s.endDate = datetime(row.END_DATE),
+          s.secondaryPayer = row.SECONDARY_PAYER,
+          s.planOwnership = row.PLAN_OWNERSHIP,
+          s.ownerName = row.OWNER_NAME
+      MERGE (pt:PayerTransition {memberid:row.MEMBERID})
+      MERGE (pt)-[:HAS_PAYERRECORD]->(payer)
+      MERGE (p)-[:HAS_PAYERTRANSITION]->(pt)
+      MERGE (payer)-[:HAS_PAYERTRANSITION]->(pt)
+      MERGE (pt)-[:HAS_PAYERRECORD]->(payer)
+
+
+# allergies
+  - url: ../../data/allergies.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (en:Encounter {id: row.ENCOUNTER})
+      CREATE (a:Allergy {code: row.CODE})
+      SET a.description = row.DESCRIPTION,
+          a.start = datetime(row.START),
+          a.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END),
+          a.system = row.SYSTEM,
+          a.type = row.TYPE,
+          a.category = row.CATEGORY,
+          a.reaction1 = row.REACTION1,
+          a.description1 = row.DESCRIPTION1,
+          a.severity1 = row.SEVERITY1,
+          a.reaction2 = row.REACTION2,
+          a.description2 = row.DESCRIPTION2,
+          a.severity2 = row.SEVERITY2
+
+      MERGE (p)-[:HAS_ALLERGY]->(a)
+      MERGE (a)-[:IS_ABOUT]->(p)
+      MERGE (en)-[:HAS_DIAGNOSED]->(a)
+      MERGE (a)-[:IS_DIAGNOSED_DURING]->(en)
+
+# conditions
+  - url: ../../data/conditions.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (en:Encounter {id: row.ENCOUNTER})
+      CREATE (c:Condition {code: row.CODE})
+      SET c.description = row.DESCRIPTION,
+          c.start = datetime(row.START),
+          c.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END)
+      MERGE (p)-[:HAS_HISTORY_OF]->(c)
+      MERGE (c)-[:IS_ABOUT]->(p)
+      MERGE (en)-[:HAS_DIAGNOSED]->(c)
+      MERGE (c)-[:IS_DIAGNOSED_DURING]->(en)
+
+# medications
+  - url: ../../data/medications.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (py:Payer {id: row.PAYER})
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      CREATE (m:Medication {code: row.CODE})
+      SET m.description = row.DESCRIPTION,
+          m.start = datetime(row.START),
+          m.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END),
+          m.baseCost = toFloat(row.BASE_COST),
+          m.payerCoverage = toFloat(row.PAYER_COVERAGE),
+          m.dispenses = toInteger(row.DISPENSES),
+          m.totalCost = toFloat(row.TOTALCOST),
+          m.reasonCode = row.REASONCODE,
+          m.reasonDescription = row.REASONDESCRIPTION
+      MERGE (p)-[:HAS_HISTORY_OF]->(m)
+      MERGE (m)-[:IS_PRESCRIBED_FOR]->(p)
+      MERGE (m)-[:IS_COVERED_BY]->(py)
+      MERGE (py)-[:HAS_COVERED]->(m)
+      MERGE (e)-[:HAS_PRESCRIBED]->(m)
+      MERGE (m)-[:IS_PRESCRIBED_DURING]->(e)
+
+# procedures
+  - url: ../../data/procedures.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+          MATCH (p:Patient {id:row.PATIENT})
+          MATCH (e:Encounter {id: row.ENCOUNTER})
+          CREATE (r:Procedure {code:row.CODE})
+          SET r.description=row.DESCRIPTION,
+              r.code = row.CODE,
+              r.start = datetime(row.START),
+              r.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END),
+              r.basecost = row.BASE_COST,
+              r.reasoncode = row.REASONCODE,
+              r.reasondescription = row.REASONDESCRIPTION
+          MERGE (p)-[:HAS_HISTORY_OF]->(r)
+          MERGE (r)-[:IS_ORDERED_FOR]->(p)
+          MERGE (e)-[:IS_ORDERED_DURING]->(r)
+          MERGE (r)-[:HAS_ORDERED]->(e)
+
+
+# observations
+  - url: ../../data/observations.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      CREATE (o:Observation {code: row.CODE})
+      SET o.description = row.DESCRIPTION,
+          o.date = datetime(row.DATE),
+          o.category = row.CATEGORY,
+          o.value = row.VALUE,
+          o.units = row.UNITS,
+          o.type = row.TYPE,
+          o.patientId = row.PATIENT,
+          o.encounterId = row.ENCOUNTER
+
+      MERGE (p)-[:HAS_HISTORY_OF]->(o)
+      MERGE (o)-[:IS_ABOUT]->(p)
+      MERGE (e)-[:IS_ORDERED_DURING]->(o)
+      MERGE (o)-[:HAS_ORDERED]->(e)
+
+# care plans
+  - url: ../../data/careplans.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+          MATCH (p:Patient {id:row.PATIENT})
+          MATCH (e:Encounter {id: row.ENCOUNTER})
+          MERGE (c:CarePlan {id:row.Id})
+
+          SET c.description = row.DESCRIPTION,
+              c.code = row.CODE,
+              c.start = datetime(row.START),
+              c.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END),
+              c.reasoncode = row.REASONCODE,
+              c.reasondescription = row.REASONDESCRIPTION,
+              c.id = row.Id,
+              c.patientId = row.PATIENT,
+              c.encounterId = row.ENCOUNTER
+
+          MERGE (p)-[:HAS_CAREPLAN]->(c)
+          MERGE (c)-[:IS_ABOUT]->(p)
+          MERGE (e)-[:IS_ORDERED_DURING]->(c)
+          MERGE (c)-[:HAS_ORDERED]->(e)
+
+# organizations
+  - url: ../../data/organizations.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MERGE (o:Organization {id:row.Id})
+        SET o.name = row.NAME,
+            o.address = row.ADDRESS,
+            o.city = row.CITY,
+            o.state = row.STATE,
+            o.lat = row.LAT,
+            o.lon = row.LON,
+            o.phone = row.PHONE,
+            o.revenue = row.REVENUE,
+            o.utilization = row.UTILIZATION,
+            o.id = row.Id
+
+# claims
+  - url: ../../data/claims.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MATCH (p:Patient {id: row.PATIENTID})
+        MATCH (pr:Provider {id: row.PROVIDERID})
+        MERGE (c:Claim {id: row.Id})
+        SET c.diagnosis1 = row.DIAGNOSIS1,
+            c.diagnosis2 = row.DIAGNOSIS2,
+            c.diagnosis3 = row.DIAGNOSIS3,
+            c.diagnosis4 = row.DIAGNOSIS4,
+            c.referringProviderId = row.REFERRINGPROVIDERID,
+            c.appointmentId = row.APPOINTMENTID,
+            c.departmentId = row.DEPARTMENTID,
+            c.currentIllnessDate = datetime(row.CURRENTILLNESSDATE),
+            c.serviceDate = datetime(row.SERVICEDATE),
+            c.supervisingProviderId = row.SUPERVISINGPROVIDERID,
+            c.status1 = row.STATUS1,
+            c.status2 = row.STATUS2,
+            c.statusP = row.STATUSP,
+            c.outstanding1 = row.OUTSTANDING1,
+            c.outstanding2 = row.OUTSTANDING2,
+            c.outstandingP = row.OUTSTANDINGP,
+            c.lastBilledDate1 = (CASE WHEN row.LASTBILLEDDATE1 <> "" THEN datetime(row.LASTBILLEDDATE1) ELSE null END),
+            c.lastBilledDate2 = (CASE WHEN row.LASTBILLEDDATE2 <> "" THEN datetime(row.LASTBILLEDDATE2) ELSE null END),
+            c.lastBilledDateP = (CASE WHEN row.LASTBILLEDDATEP <> "" THEN datetime(row.LASTBILLEDDATEP) ELSE null END),
+            c.healthcareClaimTypeId1 = row.HEALTHCARECLAIMTYPEID1,
+            c.healthcareClaimTypeId2 = row.HEALTHCARECLAIMTYPEID2,
+            c.patientId = row.PATIENTID,
+            c.providerId = row.PROVIDERID
+
+        MERGE (p)-[:HAS_CLAIM]->(c)
+        MERGE (c)-[:IS_ASSOCIATED_WITH]->(p)
+        MERGE (pr)-[:HAS_FILED]->(c)
+        MERGE (c)-[:IS_FILED_BY]->(pr)
+
+# claims transaction
+  - url: ../../data/claims_transactions.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+        MATCH (c:Claim {id: row.CLAIMID})
+        MATCH (p:Patient {id: row.PATIENTID})
+        MATCH (pr:Provider {id: row.PROVIDERID})
+        MERGE (ct:ClaimTransaction {id: row.ID})
+        SET ct.type = row.TYPE,
+            ct.chargeId = row.CHARGEID,
+            ct.amount = toFloat(row.AMOUNT),
+            ct.method = row.METHOD,
+            ct.fromDate = datetime(row.FROMDATE),
+            ct.toDate = datetime(row.TODATE),
+            ct.placeOfService = row.PLACEOFSERVICE,
+            ct.procedureCode = row.PROCEDURECODE,
+            ct.modifier1 = row.MODIFIER1,
+            ct.modifier2 = row.MODIFIER2,
+            ct.units = row.UNITS,
+            ct.notes = row.NOTES,
+            ct.unitAmount = toFloat(row.UNITAMOUNT),
+            ct.transferOutId = row.TRANSFEROUTID,
+            ct.transferType = row.TRANSFERTYPE,
+            ct.payments = toFloat(row.PAYMENTS),
+            ct.adjustments = toFloat(row.ADJUSTMENTS),
+            ct.transfers = toFloat(row.TRANSFERS),
+            ct.outstanding = toFloat(row.OUTSTANDING),
+            ct.lineNote = row.LINENOTE,
+            ct.patientId = row.PATIENTID,
+            ct.claimId = row.CLAIMID,
+            ct.providerId = row.PROVIDERID
+
+        MERGE (c)-[:HAS_TRANSACTION]->(ct)
+        MERGE (p)-[:HAS_TRANSACTION]->(ct)
+        MERGE (pr)-[:HAS_TRANSACTION]->(ct)
+        MERGE (ct)-[:IS_TRANSACTION_FOR]->(c)
+        MERGE (ct)-[:IS_ASSOCIATED_WITH]->(p)
+        MERGE (ct)-[:IS_ASSOCIATED_WITH]->(pr)
+
+
+# devices
+  - url: ../../data/devices.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      CREATE (d:Device {code: row.CODE})
+      SET
+          d.start = datetime(row.START),
+          d.stop = (CASE WHEN row.STOP <> "" THEN datetime(row.STOP) ELSE null END),
+          d.description = row.DESCRIPTION,
+          d.udi = row.UDI
+      MERGE (e)-[:HAS_ORDERED]->(d)
+      MERGE (d)-[:IS_ORDERED_DURING]->(e)
+      MERGE (p)-[:IS_MEASURED_BY]->(d)
+      MERGE (d)-[:HAS_MEASURED]->(p)
+
+# imaging studies
+  - url: ../../data/imaging_studies.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      MERGE (i:ImagingStudy {id: row.Id})
+      SET i.seriesUid = row.SERIES_UID,
+          i.date = datetime(row.DATE),
+          i.bodySiteCode = row.BODYSITE_CODE,
+          i.bodySiteDescription = row.BODYSITE_DESCRIPTION,
+          i.modalityCode = row.MODALITY_CODE,
+          i.modalityDescription = row.MODALITY_DESCRIPTION,
+          i.instanceUid = row.INSTANCE_UID,
+          i.sopCode = row.SOP_CODE,
+          i.sopDescription = row.SOP_DESCRIPTION,
+          i.procedureCode = row.PROCEDURE_CODE,
+          i.patientId = row.PATIENT,
+          i.encounterId = row.ENCOUNTER
+      MERGE (p)-[:HAS_HISTORY_OF]->(i)
+      MERGE (i)-[:IS_PRESCRIBED_FOR]->(p)
+      MERGE (e)-[:HAS_ORDERED]->(i)
+      MERGE (i)-[:IS_ORDERED_DURING]->(e)
+
+# immunization
+  - url: ../../data/immunizations.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      CREATE (i:Immunization {code: row.CODE})
+      SET i.description = row.DESCRIPTION,
+          i.baseCost = row.BASE_COST,
+          i.date = datetime(row.DATE)
+      MERGE (p)-[:HAS_HISTORY_FOR]->(i)
+      MERGE (i)-[:IS_PRESCRIBED_FOR]->(p)
+      WITH row, i
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      MERGE (e)-[:HAS_PRESCRIBED]->(i)
+      MERGE (i)-[:IS_PRESCRIBED_DURING]->(e)
+
+# supply
+  - url: ../../data/supplies.csv
+    compression: none
+    skip_file: false
+    cql: |
+      WITH $dict.rows as rows UNWIND rows as row
+      MATCH (p:Patient {id: row.PATIENT})
+      CREATE (s:Supply {code: row.CODE})
+      SET s.description = row.DESCRIPTION,
+          s.quantity = row.QUANTITY,
+          s.date = datetime(row.DATE)
+      MERGE (p)-[:IS_ORDERED_FOR]->(s)
+      MERGE (s)-[:HAS_HISTORY_OF]->(p)
+      WITH row, s
+      MATCH (e:Encounter {id: row.ENCOUNTER})
+      MERGE (e)-[:HAS_ORDERED]->(s)
+      MERGE (s)-[:IS_ORDERED_DURING]->(e)
+
+  # patient expenses
+  #- url: ../../data/patient_expenses.csv
+    #compression: none
+    #skip_file: false
+    #cql: |
+      #WITH $dict.rows as rows UNWIND rows as row
+      #MATCH (p:Patient {id: row.PATIENT_ID})
+      #MATCH (py:Payer {code: row.PAYER_ID})
+      #MERGE (pe:PatientExpenses {patient: row.PAYER_ID})
+      #SET pe.incurance_cost = row.INSURANCE_COSTS,
+          #pe.healthcare_expenses = row.HEALTHCARE_EXPENSES,
+          #pe.covered_cost = row.COVERED_COSTS,
+          #pe.year = datetime(row.YEAR)
+      #MERGE (p)-[:HAS_EXPENSES]->(pe)
+      #MERGE (pe)-[:IS_ASSOCIATED_WITH]->(p)
+      #MERGE (pe)-[:GOT_PAID_BY]->(py)
+      #MERGE (py)-[:HAS_HISTORY_FOR]->(pe)
+
+
+pre_ingest:
+  - CREATE INDEX IF NOT EXISTS FOR (n:Encounter) ON (n.date)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Encounter) ON (n.isEnd)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Patient) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Provider) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Payer) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:PayerTransition) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Organization) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Medication) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Condition) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:CarePlan) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Allergy) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Procedure) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Claim) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:ClaimTransaction) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Device) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:ImagingStudy) ON (n.id)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Immunization) ON (n.code)
+  - CREATE INDEX IF NOT EXISTS FOR (n:Supply) ON (n.code)
+
+
+
+post_ingest:
+  # Create NEXT relationship between encounters of a patient
+  - |
+    MATCH (p:Patient)
+    MATCH (p)-[:HAS_ENCOUNTER]->(e)
+    WITH e
+    ORDER BY e.date
+    WITH collect(e) AS encounters
+    UNWIND range(0,size(encounters)-2) as idx
+    WITH encounters[idx] as first, encounters[idx+1] as second
+    CREATE (first)-[:NEXT]->(second)
+
+  # Pre-compute patient counts for each Condition
+  - |
+    MATCH (c:Condition)
+    MATCH (c)<-[:HAS_CONDITION]-(:Encounter)<-[:HAS_ENCOUNTER]-(p:Patient)
+    WITH c, count(DISTINCT p) AS NUM
+    SET c.num = NUM

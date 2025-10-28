@@ -1,0 +1,4 @@
+# Mongodb requirements:
+pymongo
+tqdm
+pyyaml
